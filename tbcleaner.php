@@ -40,13 +40,11 @@ class TbCleaner extends Module
     {
         $this->name = 'tbcleaner';
         $this->tab = 'administration';
-        $this->version = '2.1.0';
+        $this->version = '2.2.0';
         $this->author = 'thirty bees';
         $this->need_instance = false;
-
         $this->bootstrap = true;
         parent::__construct();
-
         $this->displayName = $this->l('thirty bees cleaner');
         $this->description = $this->l('Check and fix functional integrity constraints and remove default data');
     }
@@ -59,13 +57,13 @@ class TbCleaner extends Module
      */
     public function getContent()
     {
-        $html = '<h2>'.$this->l('Be really careful with this tool - There is no possible rollback!').'</h2>';
+        $html = '<div class="panel"><div class="alert alert-danger"><b>'.$this->l('Be really careful with this tool - There is no possible rollback!').'</b></div></div>';
         if (Tools::isSubmit('submitCheckAndFix')) {
             $logs = self::checkAndFix();
             if (count($logs)) {
-                $conf = $this->l('The following queries recovered broken data:').'<br /><ul>';
+                $conf = $this->l('The following queries recovered broken data:').'<br><ul>';
                 foreach ($logs as $query => $entries) {
-                    $conf .= '<li>'.Tools::htmlentitiesUTF8($query).'<br />'.sprintf($this->l('%d line(s)'), $entries).'</li>';
+                    $conf .= '<li>'.Tools::htmlentitiesUTF8($query).'<br>'.sprintf($this->l('%d line(s)'), $entries).'</li>';
                 }
                 $conf .= '</ul>';
             } else {
@@ -75,11 +73,7 @@ class TbCleaner extends Module
         } elseif (Tools::isSubmit('submitCleanAndOptimize')) {
             $logs = self::cleanAndOptimize();
             if (count($logs)) {
-                $conf = $this->l('The following queries successfully cleaned your database:').'<br /><ul>';
-                foreach ($logs as $query => $entries) {
-                    $conf .= '<li>'.Tools::htmlentitiesUTF8($query).'<br />'.sprintf($this->l('%d line(s)'), $entries).'</li>';
-                }
-                $conf .= '</ul>';
+                $conf = $this->l('Successfully cleaned your database');
             } else {
                 $conf = $this->l('Nothing that needs to be cleaned');
             }
@@ -91,33 +85,31 @@ class TbCleaner extends Module
             self::truncate('sales');
             $html .= $this->displayConfirmation($this->l('Orders and customers truncated'));
         }
-
         $html .= '
-		<script type="text/javascript">
-			$(document).ready(function(){
-				$("#submitTruncateCatalog").click(function(){
-					if ($(\'#checkTruncateCatalog_on\').attr(\'checked\') != "checked")
-					{
-						alert(\''.addslashes(html_entity_decode($this->l('Please read the disclaimer and click "Yes" above'))).'\');
-						return false;
-					}
-					if (confirm(\''.addslashes(html_entity_decode($this->l('Are you sure that you want to delete all catalog data?'))).'\'))
-						return true;
-					return false;
-				});
-				$("#submitTruncateSales").click(function(){
-					if ($(\'#checkTruncateSales_on\').attr(\'checked\') != "checked")
-					{
-						alert(\''.addslashes(html_entity_decode($this->l('Please read the disclaimer and click "Yes" above'))).'\');
-						return false;
-					}
-					if (confirm(\''.addslashes(html_entity_decode($this->l('Are you sure that you want to delete all sales data?'))).'\'))
-						return true;
-					return false;
-				});
-			});
-		</script>';
-
+        <script type="text/javascript">
+            $(document).ready(function(){
+                $("#submitTruncateCatalog").click(function(){
+                    if ($(\'#checkTruncateCatalog_on\').attr(\'checked\') != "checked")
+                    {
+                        alert(\''.addslashes(html_entity_decode($this->l('Please read the disclaimer and click "Yes" above'))).'\');
+                        return false;
+                    }
+                    if (confirm(\''.addslashes(html_entity_decode($this->l('Are you sure that you want to delete all catalog data?'))).'\'))
+                        return true;
+                    return false;
+                });
+                $("#submitTruncateSales").click(function(){
+                    if ($(\'#checkTruncateSales_on\').attr(\'checked\') != "checked")
+                    {
+                        alert(\''.addslashes(html_entity_decode($this->l('Please read the disclaimer and click "Yes" above'))).'\');
+                        return false;
+                    }
+                    if (confirm(\''.addslashes(html_entity_decode($this->l('Are you sure that you want to delete all sales data?'))).'\'))
+                        return true;
+                    return false;
+                });
+            });
+        </script>';
         return $html.$this->renderForm();
     }
 
@@ -130,7 +122,6 @@ class TbCleaner extends Module
     {
         $db = Db::getInstance();
         $logs = [];
-
         // Remove doubles in the configuration
         $filteredConfiguration = [];
         $result = $db->ExecuteS('SELECT * FROM '._DB_PREFIX_.'configuration');
@@ -144,70 +135,54 @@ class TbCleaner extends Module
             }
         }
         unset($filteredConfiguration);
-
         // Remove inexisting or monolanguage configuration value from configuration_lang
         $query = 'DELETE FROM `'._DB_PREFIX_.'configuration_lang`
         WHERE `id_configuration` NOT IN (SELECT `id_configuration` FROM `'._DB_PREFIX_.'configuration`)
         OR `id_configuration` IN (SELECT `id_configuration` FROM `'._DB_PREFIX_.'configuration` WHERE name IS NULL OR name = "")';
-
         static::executeStatement($query, $logs);
-
         // Simple Cascade Delete
         $queries = self::getCheckAndFixQueries();
-
         $queries = self::bulle($queries);
         foreach ($queries as $queryArray) {
             // If this is a module and the module is not installed, we continue
             if (isset($queryArray[4]) && !Module::isInstalled($queryArray[4])) {
                 continue;
             }
-
             $query = 'DELETE FROM `'._DB_PREFIX_.$queryArray[0].'` WHERE `'.$queryArray[1].'` NOT IN (SELECT `'.$queryArray[3].'` FROM `'._DB_PREFIX_.$queryArray[2].'`)';
             static::executeStatement($query, $logs);
         }
-
         // _lang table cleaning
         $tables = Db::getInstance()->executeS('SHOW TABLES LIKE "'.preg_replace('/([%_])/', '\\$1', _DB_PREFIX_).'%_\\_lang"');
         foreach ($tables as $table) {
             $tableLang = current($table);
             $table = str_replace('_lang', '', $tableLang);
             $idTable = 'id_'.preg_replace('/^'._DB_PREFIX_.'/', '', $table);
-
             $query = 'DELETE FROM `'.bqSQL($tableLang).'` WHERE `'.bqSQL($idTable).'` NOT IN (SELECT `'.bqSQL($idTable).'` FROM `'.bqSQL($table).'`)';
             static::executeStatement($query, $logs);
-
             $query = 'DELETE FROM `'.bqSQL($tableLang).'` WHERE `id_lang` NOT IN (SELECT `id_lang` FROM `'._DB_PREFIX_.'lang`)';
             static::executeStatement($query, $logs);
         }
-
         // _shop table cleaning
         $tables = Db::getInstance()->executeS('SHOW TABLES LIKE "'.preg_replace('/([%_])/', '\\$1', _DB_PREFIX_).'%_\\_shop"');
         foreach ($tables as $table) {
             $tableShop = current($table);
             $table = str_replace('_shop', '', $tableShop);
             $idTable = 'id_'.preg_replace('/^'._DB_PREFIX_.'/', '', $table);
-
             if (in_array($tableShop, [_DB_PREFIX_.'carrier_tax_rules_group_shop'])) {
                 continue;
             }
-
             $query = 'DELETE FROM `'.bqSQL($tableShop).'` WHERE `'.bqSQL($idTable).'` NOT IN (SELECT `'.bqSQL($idTable).'` FROM `'.bqSQL($table).'`)';
             static::executeStatement($query, $logs);
-
             $query = 'DELETE FROM `'.bqSQL($tableShop).'` WHERE `id_shop` NOT IN (SELECT `id_shop` FROM `'._DB_PREFIX_.'shop`)';
             static::executeStatement($query, $logs);
         }
-
         // stock_available
         $query = 'DELETE FROM `'._DB_PREFIX_.'stock_available` WHERE `id_shop` NOT IN (SELECT `id_shop` FROM `'._DB_PREFIX_.'shop`) AND `id_shop_group` NOT IN (SELECT `id_shop_group` FROM `'._DB_PREFIX_.'shop_group`)';
         static::executeStatement($query, $logs);
-
         Category::regenerateEntireNtree();
-
         // @Todo: Remove attachment files, images...
         Image::clearTmpDir();
         self::clearAllCaches();
-
         return $logs;
     }
 
@@ -241,7 +216,6 @@ class TbCleaner extends Module
     public static function getCheckAndFixQueries()
     {
         return [
-            // 0 => DELETE FROM __table__, 1 => WHERE __id__ NOT IN, 2 => NOT IN __table__, 3 => __id__ used in the "NOT IN" table, 4 => module_name
             ['access', 'id_profile', 'profile', 'id_profile'],
             ['accessory', 'id_product_1', 'product', 'id_product'],
             ['accessory', 'id_product_2', 'product', 'id_product'],
@@ -396,7 +370,6 @@ class TbCleaner extends Module
                 }
             }
         }
-
         return $array;
     }
 
@@ -419,35 +392,47 @@ class TbCleaner extends Module
     public static function cleanAndOptimize()
     {
         $logs = [];
-
-        $query = '
-		DELETE FROM `'._DB_PREFIX_.'cart`
-		WHERE id_cart NOT IN (SELECT id_cart FROM `'._DB_PREFIX_.'orders`)
-		AND date_add < "'.pSQL(date('Y-m-d', strtotime('-1 month'))).'"';
-
+        $query = 'DELETE FROM `'._DB_PREFIX_.'guest`';
         static::executeStatement($query, $logs);
-
-        $query = '
-		DELETE FROM `'._DB_PREFIX_.'cart_rule`
-		WHERE (
-			active = 0
-			OR quantity = 0
-			OR date_to < "'.pSQL(date('Y-m-d')).'"
-		)
-		AND date_add < "'.pSQL(date('Y-m-d', strtotime('-1 month'))).'"';
-
+        $query = 'DELETE FROM `'._DB_PREFIX_.'connections`';
         static::executeStatement($query, $logs);
-
-        $parents = Db::getInstance()->ExecuteS('SELECT DISTINCT id_parent FROM '._DB_PREFIX_.'tab');
+        $query = 'DELETE FROM `'._DB_PREFIX_.'connections_page`';
+        static::executeStatement($query, $logs);
+        $query = 'DELETE FROM `'._DB_PREFIX_.'connections_source`';
+        static::executeStatement($query, $logs);
+        $query = '
+            DELETE FROM `'._DB_PREFIX_.'cart`
+            WHERE id_cart NOT IN (SELECT id_cart FROM `'._DB_PREFIX_.'orders`)
+            AND date_add < "'.pSQL(date('Y-m-d', strtotime('-1 month'))).'"
+        ';
+        static::executeStatement($query, $logs);
+        $query = '
+            DELETE FROM `'._DB_PREFIX_.'cart_rule`
+            WHERE (active = 0 OR quantity = 0 OR date_to < "'.pSQL(date('Y-m-d')).'")
+            AND date_add < "'.pSQL(date('Y-m-d', strtotime('-1 month'))).'"
+        ';
+        static::executeStatement($query, $logs);
+        $parents = Db::getInstance()->ExecuteS('
+            SELECT DISTINCT id_parent
+            FROM '._DB_PREFIX_.'tab
+        ');
         foreach ($parents as $parent) {
-            $children = Db::getInstance()->ExecuteS('SELECT id_tab FROM '._DB_PREFIX_.'tab WHERE id_parent = '.(int) $parent['id_parent'].' ORDER BY IF(class_name IN ("AdminHome", "AdminDashboard"), 1, 2), position ASC');
+            $children = Db::getInstance()->ExecuteS('
+                SELECT id_tab
+                FROM '._DB_PREFIX_.'tab
+                WHERE id_parent = '.(int) $parent['id_parent'].'
+                ORDER BY IF(class_name IN ("AdminHome", "AdminDashboard"), 1, 2), position ASC
+            ');
             $i = 1;
             foreach ($children as $child) {
-                $query = 'UPDATE '._DB_PREFIX_.'tab SET position = '.(int) ($i++).' WHERE id_tab = '.(int) $child['id_tab'].' AND id_parent = '.(int) $parent['id_parent'];
+                $query = '
+                    UPDATE '._DB_PREFIX_.'tab
+                    SET position = '.(int) ($i++).'
+                    WHERE id_tab = '.(int) $child['id_tab'].'
+                    AND id_parent = '.(int) $parent['id_parent'];
                 static::executeStatement($query, $logs);
             }
         }
-
         return $logs;
     }
 
@@ -461,7 +446,6 @@ class TbCleaner extends Module
     public function truncate($case)
     {
         static::executeStatement('SET FOREIGN_KEY_CHECKS = 0;');
-
         switch ($case) {
             case 'catalog':
                 $idHome = Configuration::getMultiShopValues('PS_HOME_CATEGORY');
@@ -469,7 +453,6 @@ class TbCleaner extends Module
                 static::executeStatement('DELETE FROM `'._DB_PREFIX_.'category` WHERE id_category NOT IN ('.implode(',', array_map('intval', $idHome)).', '.implode(',', array_map('intval', $idRoot)).')');
                 static::executeStatement('DELETE FROM `'._DB_PREFIX_.'category_lang` WHERE id_category NOT IN ('.implode(',', array_map('intval', $idHome)).', '.implode(',', array_map('intval', $idRoot)).')');
                 static::executeStatement('DELETE FROM `'._DB_PREFIX_.'category_shop` WHERE id_category NOT IN ('.implode(',', array_map('intval', $idHome)).', '.implode(',', array_map('intval', $idRoot)).')');
-
                 foreach (scandir(_PS_CAT_IMG_DIR_) as $dir) {
                     if (preg_match('/^[0-9]+(-(.*))?\.jpg$/', $dir)) {
                         unlink(_PS_CAT_IMG_DIR_.$dir);
@@ -480,7 +463,6 @@ class TbCleaner extends Module
                     static::executeStatement('TRUNCATE TABLE `'._DB_PREFIX_.bqSQL($table).'`');
                 }
                 static::executeStatement('DELETE FROM `'._DB_PREFIX_.'address` WHERE id_manufacturer > 0 OR id_supplier > 0 OR id_warehouse > 0');
-
                 Image::deleteAllImages(_PS_PROD_IMG_DIR_);
                 if (!file_exists(_PS_PROD_IMG_DIR_)) {
                     mkdir(_PS_PROD_IMG_DIR_);
@@ -496,34 +478,27 @@ class TbCleaner extends Module
                     }
                 }
                 break;
-
             case 'sales':
                 $tables = self::getSalesRelatedTables();
-
                 $modulesTables = [
                     'sekeywords'    => ['sekeyword'],
                     'pagesnotfound' => ['pagenotfound'],
                     'statsmodule'   => ['sekeyword', 'pagenotfound'],
                     'paypal'        => ['paypal_customer', 'paypal_order'],
                 ];
-
                 foreach ($modulesTables as $name => $moduleTables) {
                     if (Module::isInstalled($name)) {
                         $tables = array_merge($tables, $moduleTables);
                     }
                 }
-
                 foreach ($tables as $table) {
                     static::executeStatement('TRUNCATE TABLE `'._DB_PREFIX_.bqSQL($table).'`');
                 }
                 static::executeStatement('DELETE FROM `'._DB_PREFIX_.'address` WHERE id_customer > 0');
                 static::executeStatement('DELETE FROM `'._DB_PREFIX_.'employee_notification`');
-
                 break;
         }
-
         self::clearAllCaches();
-
         static::executeStatement('SET FOREIGN_KEY_CHECKS = 1;');
     }
 
@@ -659,7 +634,35 @@ class TbCleaner extends Module
      */
     public function renderForm()
     {
+        $cronLink = rtrim(Context::getContext()->link->getBaseLink(), '/').'/modules/tbcleaner/tbcleaner-cron.php?token='.substr(Tools::encrypt('tbcleaner/cron'), 0, 10);
         $fieldsForm1 = [
+            'form' => [
+                'legend' => [
+                    'title' => $this->l('Database cleaning'),
+                    'icon'  => 'icon-cogs',
+                ],
+                'description' => '<b>'.$this->l('CRON URL:').'</b> '.$cronLink,
+                'submit' => [
+                    'title' => $this->l('Clean & Optimize'),
+                    'class' => 'btn btn-default pull-right',
+                    'name'  => 'submitCleanAndOptimize',
+                ],
+            ],
+        ];
+        $fieldsForm2 = [
+            'form' => [
+                'legend' => [
+                    'title' => $this->l('Functional integrity constraints'),
+                    'icon'  => 'icon-cogs',
+                ],
+                'submit' => [
+                    'title' => $this->l('Check & fix'),
+                    'class' => 'btn btn-default pull-right',
+                    'name'  => 'submitCheckAndFix',
+                ],
+            ],
+        ];
+        $fieldsForm3 = [
             'form' => [
                 'legend' => [
                     'title' => $this->l('Catalog'),
@@ -669,7 +672,8 @@ class TbCleaner extends Module
                     [
                         'type'    => 'switch',
                         'is_bool' => true,
-                        'label'   => $this->l('I understand that all the catalog data will be removed without possible rollback: products, features, categories, tags, images, prices, attachments, scenes, stocks, attribute groups and values, manufacturers, suppliers...'),
+                        'label'   => $this->l('Delete catalog'),
+                        'desc'    => $this->l('I understand that all the catalog data will be removed without possible rollback: products, features, categories, tags, images, prices, attachments, scenes, stocks, attribute groups and values, manufacturers, suppliers...'),
                         'name'    => 'checkTruncateCatalog',
                         'values'  => [
                             [
@@ -693,8 +697,7 @@ class TbCleaner extends Module
                 ],
             ],
         ];
-
-        $fieldsForm2 = [
+        $fieldsForm4 = [
             'form' => [
                 'legend' => [
                     'title' => $this->l('Orders and customers'),
@@ -704,7 +707,8 @@ class TbCleaner extends Module
                     [
                         'type'    => 'switch',
                         'is_bool' => true,
-                        'label'   => $this->l('I understand that all the orders and customers will be removed without possible rollback: customers, carts, orders, connections, guests, messages, stats...'),
+                        'label'   => $this->l('Delete orders & customers'),
+                        'desc'    => $this->l('I understand that all the orders and customers will be removed without possible rollback: customers, carts, orders, connections, guests, messages, stats...'),
                         'name'    => 'checkTruncateSales',
                         'values'  => [
                             [
@@ -728,37 +732,8 @@ class TbCleaner extends Module
                 ],
             ],
         ];
-
-        $fieldsForm3 = [
-            'form' => [
-                'legend' => [
-                    'title' => $this->l('Functional integrity constraints'),
-                    'icon'  => 'icon-cogs',
-                ],
-                'submit' => [
-                    'title' => $this->l('Check & fix'),
-                    'class' => 'btn btn-default pull-right',
-                    'name'  => 'submitCheckAndFix',
-                ],
-            ],
-        ];
-        $fieldsForm4 = [
-            'form' => [
-                'legend' => [
-                    'title' => $this->l('Database cleaning'),
-                    'icon'  => 'icon-cogs',
-                ],
-                'submit' => [
-                    'title' => $this->l('Clean & Optimize'),
-                    'class' => 'btn btn-default pull-right',
-                    'name'  => 'submitCleanAndOptimize',
-                ],
-            ],
-        ];
-
         /** @var AdminController $controller */
         $controller = $this->context->controller;
-
         $helper = new HelperForm();
         $helper->module = $this;
         $helper->show_toolbar = false;
@@ -776,7 +751,6 @@ class TbCleaner extends Module
             'languages'    => $controller->getLanguages(),
             'id_language'  => $this->context->language->id,
         ];
-
         return $helper->generateForm([$fieldsForm1, $fieldsForm2, $fieldsForm3, $fieldsForm4]);
     }
 
